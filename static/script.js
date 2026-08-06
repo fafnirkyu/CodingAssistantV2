@@ -9,7 +9,22 @@ const deleteProjectBtn = document.getElementById("deleteProject");
 
 let currentAbortController = null;
 
-// ---------- NEW: Project History Loading ----------
+// ---------- API Key Management ----------
+function getApiKey() {
+  return window.APP_API_KEY || "";
+}
+
+function getHeaders(includeContentType = true) {
+  const headers = {
+    "X-API-Key": getApiKey()
+  };
+  if (includeContentType) {
+    headers["Content-Type"] = "application/json";
+  }
+  return headers;
+}
+
+// ---------- Project History Loading ----------
 
 async function loadHistory(project) {
   chatDiv.innerHTML = '<div class="message assistant"><em>Loading history...</em></div>';
@@ -25,13 +40,11 @@ async function loadHistory(project) {
         if (msg.role === "user") {
           appendAndScroll(makeUserNode(msg.content));
         } else {
-          // Assistant messages need markdown parsing
           const node = makeAssistantNode();
           node.innerHTML = `<strong>Assistant:</strong><br>${marked.parse(msg.content)}`;
           appendAndScroll(node);
         }
       });
-      // Re-highlight all code blocks after loading
       if (typeof hljs !== 'undefined') hljs.highlightAll();
     } else {
       chatDiv.innerHTML = '<div class="message assistant"><em>New project started. No history found.</em></div>';
@@ -42,7 +55,6 @@ async function loadHistory(project) {
   }
 }
 
-// Listen for dropdown changes
 projectSelect.addEventListener("change", () => {
   loadHistory(projectSelect.value);
 });
@@ -81,26 +93,33 @@ async function refreshProjects() {
     projectSelect.appendChild(opt);
   });
 
-  // Keep selection if it still exists, otherwise load the first project
   if (data.includes(currentVal)) {
     projectSelect.value = currentVal;
   } else if (data.length > 0) {
     projectSelect.value = data[0];
-    loadHistory(data[0]); // Load history for the initial project
+    loadHistory(data[0]);
   }
 }
 
 addProjectBtn.addEventListener("click", async () => {
   const name = prompt("Project Name:");
   if (!name) return;
-  await fetch(`/add_project/${name}`, { method: "POST" });
+  await fetch(`/add_project`, { 
+    method: "POST", 
+    headers: getHeaders(),
+    body: JSON.stringify({ project: name })
+  });
   await refreshProjects();
 });
 
 deleteProjectBtn.addEventListener("click", async () => {
   const p = projectSelect.value;
   if (!p || !confirm(`Delete project ${p}?`)) return;
-  await fetch(`/delete_project/${p}`, { method: "DELETE" });
+  await fetch(`/delete_project`, { 
+    method: "POST", 
+    headers: getHeaders(),
+    body: JSON.stringify({ project: p })
+  });
   await refreshProjects();
 });
 
@@ -126,8 +145,9 @@ sendBtn.addEventListener("click", async () => {
       assistantNode.innerHTML = `<strong>Assistant:</strong><br><em>Searching web...</em>`;
       const sResp = await fetch("/search_web", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: text })
+        headers: getHeaders(),
+        body: JSON.stringify({ query: text }),
+        signal: currentAbortController.signal
       });
       const sData = await sResp.json();
       search_results = sData.results || [];
@@ -135,7 +155,7 @@ sendBtn.addEventListener("click", async () => {
 
     const res = await fetch("/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getHeaders(),
       body: JSON.stringify({ project, message: text, search_results }),
       signal: currentAbortController.signal
     });
@@ -159,7 +179,6 @@ sendBtn.addEventListener("click", async () => {
   }
 });
 
-// Clear UI only (doesn't delete database)
 clearBtn.addEventListener("click", () => {
   chatDiv.innerHTML = "";
 });
@@ -174,7 +193,15 @@ async function uploadFile(project) {
   formData.append("file", fileInput.files[0]);
 
   try {
-    const res = await fetch(`/upload_file/${project}`, { method: "POST", body: formData });
+    // Do not set Content-Type header when uploading FormData so the browser automatically handles the boundary
+    const headers = {
+      "X-API-Key": getApiKey()
+    };
+    const res = await fetch(`/upload_file/${project}`, { 
+      method: "POST", 
+      headers: headers,
+      body: formData 
+    });
     const data = await res.json();
     if (data.status === "ok") {
       alert(`Uploaded: ${data.filename}`);
@@ -187,10 +214,8 @@ async function uploadFile(project) {
   }
 }
 
-// Ctrl+Enter support
 promptInput.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key === "Enter") sendBtn.click();
 });
 
-// Initial Init
 refreshProjects();

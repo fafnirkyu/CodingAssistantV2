@@ -34,12 +34,28 @@ This assistant provides high-quality coding intelligence within a constrained 2G
 └── README.md
 
 ---
+## 🔒 Security & Hardening
+
+This project incorporates robust security controls tailored for public cloud deployments:
+
+1. Authentication: All sensitive mutation and inference routes require a valid X-API-Key header matched against environment variables.
+
+2. Rate Limiting: Custom IP-based rate tracking returns HTTP 429 (Too Many Requests) status codes if thresholds are exceeded.
+
+3. Verification: to verify the security implementation run sec_test.py:
+
+    ```bash
+    python sec_test.py
+    ```
+
+---
 
 ## Deployment (Railway)
 
 1. Mount Volumes: Create a volume and mount it to /app/data and /app/models.
 
 2. Environment Variables:
+   - `API_KEY`: Your secret key for API verification.
    - `PORT`: 8080
    - `PYTHONUNBUFFERED`: 1
 

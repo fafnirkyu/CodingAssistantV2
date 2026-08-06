@@ -2,16 +2,48 @@ import os
 import re
 import glob
 import time
-import json
+import functools
 import sqlite3
 import subprocess
-from typing import List, Dict, Tuple, Optional
+from typing import List, Tuple, Optional
 from flask import Flask, request, jsonify, render_template, Response, abort
 import requests
 from werkzeug.utils import secure_filename
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
+from dotenv import load_dotenv
 
+load_dotenv()
+
+API_KEYS = os.getenv("API_KEY")
+# Security:
+RATE_LIMIT = 10  # 10 requests per minute
+REQUEST_COUNTS = {}
+# rate limiting decorator
+def rate_limit(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        client_ip = request.remote_addr  # Get the client's IP address
+        now = time.time()
+        if client_ip not in REQUEST_COUNTS:
+            REQUEST_COUNTS[client_ip] = {"count": 0, "timestamp": now}
+        if now - REQUEST_COUNTS[client_ip]["timestamp"] > 60:  # Reset count after 1 minute
+            REQUEST_COUNTS[client_ip] = {"count": 0, "timestamp": now}
+        if REQUEST_COUNTS[client_ip]["count"] >= RATE_LIMIT:
+            abort(429)  # Too Many Requests
+        REQUEST_COUNTS[client_ip]["count"] += 1
+        return func(*args, **kwargs)
+    return wrapper
+#api key decorator
+def require_api_key(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key')  # Assuming key is sent in header
+        if api_key and api_key == API_KEYS:
+            return func(*args, **kwargs)
+        else:
+            abort(401)  # Unauthorized
+    return wrapper
 # --- Cloud Config ---
 # We use a 1.5B model so it doesn't crash Railway's free RAM (approx 2GB)
 REPO_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF"
@@ -28,9 +60,8 @@ if not os.path.exists(model_path):
     hf_hub_download(repo_id=REPO_ID, filename=FILENAME, local_dir="/app/models")
 
 # Initialize LLM
-llm = Llama(model_path=model_path, n_ctx=4012, n_threads=4, n_batch=512, flash_attn=True)
+llm = Llama(model_path=model_path, n_ctx=8192, n_threads=4, n_batch=512, flash_attn=True)
 
-# Update your DB_PATH to use the persistent volume
 DB_PATH = "/app/data/memory.db"
 PROJECTS_DIR = os.getenv("PROJECTS_DIR", "./projects")
 
@@ -346,8 +377,14 @@ IMPORTANT:
 
 # -------------- Routes --------------
 @app.route("/")
+@rate_limit
 def index():
-    return render_template("index.html")
+    return render_template("index.html", api_key=API_KEYS)
+
+@app.route("/protected")
+@require_api_key
+def protected_resource():
+    return "This is a protected resource!"
 
 @app.route("/history/<project>", methods=["GET"])
 def get_history(project):
@@ -376,6 +413,7 @@ def get_projects():
     return jsonify([r[0] for r in rows])
 
 @app.route("/settings", methods=["GET", "POST"])
+@require_api_key
 def settings():
     """Get or update runtime settings without redeploy."""
     global MODEL, TEMPERATURE, TOP_P, NUM_CTX, SEED
@@ -405,6 +443,7 @@ def add_project():
     return jsonify({"status": "ok", "project": project})
 
 @app.route("/chat", methods=["POST"])
+@require_api_key
 def chat():
     data = request.json or {}
     project = data.get("project", "default")
@@ -435,6 +474,8 @@ def chat():
     return jsonify({"response": assistant_text, "saved_files": saved_files})
 
 @app.route("/stream", methods=["POST"])
+@require_api_key
+@rate_limit
 def stream():
     data = request.json or {}
     project = data.get("project", "default")
@@ -477,6 +518,8 @@ def stream():
     return resp
 
 @app.route("/search_web", methods=["POST"])
+@require_api_key
+@rate_limit
 def search_web():
     data = request.json or {}
     query = (data.get("query") or "").strip()
@@ -504,6 +547,8 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @app.route("/upload_file/<project>", methods=["POST"])
+@require_api_key
+@rate_limit
 def upload_file(project):
     if "file" not in request.files:
         return jsonify({"error": "no file part"}), 400
@@ -521,6 +566,7 @@ def upload_file(project):
         return jsonify({"error": "file type not allowed"}), 400
 
 @app.route("/delete_project", methods=["POST"])
+@require_api_key
 def delete_project():
     data = request.json or {}
     project = (data.get("project") or "").strip()
@@ -554,6 +600,8 @@ def _run_cmd(cmd: List[str], cwd: Optional[str] = None, timeout: int = 20) -> Tu
         return 1, "", str(e)
 
 @app.route("/run/<project>", methods=["POST"])
+@require_api_key
+@rate_limit
 def run_project(project):
     if not RUNNER_ENABLED:
         return jsonify({"error": "runner disabled; set RUNNER_ENABLED=1"}), 400
@@ -569,6 +617,8 @@ def run_project(project):
     return jsonify({"code": code, "stdout": out, "stderr": err})
 
 @app.route("/lint/<project>", methods=["POST"])
+@require_api_key
+@rate_limit
 def lint(project):
     if not LINTER_ENABLED:
         return jsonify({"error": "linter disabled; set LINTER_ENABLED=1"}), 400

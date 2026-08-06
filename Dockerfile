@@ -7,12 +7,17 @@ WORKDIR /app
 
 # Install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir huggingface_hub llama-cpp-python gunicorn flask requests
-
+RUN pip install --no-cache-dir huggingface_hub llama-cpp-python gunicorn flask requests python-dotenv
 COPY . .
 
 # Railway uses the PORT env var
 ENV PORT=8080
 EXPOSE 8080
+
+#creates user appuser and sets ownership of /app to that user
+RUN useradd -m appuser
+RUN chown -R appuser:appuser /app
+
+USER appuser
 
 CMD ["gunicorn", "--bind", "0.0.0.0:8080", "backend.app:app"]

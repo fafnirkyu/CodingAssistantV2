@@ -39,7 +39,9 @@
     // Initialize Markdown and Code Highlighting
     marked.setOptions({ gfm: true, breaks: true });
   </script>
-
+  <script>
+  window.APP_API_KEY = "{{ api_key }}";
+  </script>
   <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
