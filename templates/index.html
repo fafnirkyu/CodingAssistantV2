@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8"/>
   <title>Coding Assistant Web GUI</title>
-
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   <link rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <!-- Google Identity Services script -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <div class="container">
@@ -18,6 +19,7 @@
       </label>
       <button id="addProject">+ Add Project</button>
       <button id="deleteProject">Delete Project</button>
+      <button id="loginBtn">Log In with Google</button>
     </div>
 
     <div id="chat" class="chat" aria-live="polite"></div>
@@ -36,11 +38,10 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script>
-    // Initialize Markdown and Code Highlighting
     marked.setOptions({ gfm: true, breaks: true });
   </script>
   <script>
-  window.APP_API_KEY = "{{ api_key }}";
+    window.GOOGLE_CLIENT_ID = "{{ google_client_id }}";
   </script>
   <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>

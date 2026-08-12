@@ -6,35 +6,91 @@ const clearBtn = document.getElementById("clear");
 const projectSelect = document.getElementById("project");
 const addProjectBtn = document.getElementById("addProject");
 const deleteProjectBtn = document.getElementById("deleteProject");
+const loginBtn = document.getElementById("loginBtn");
 
 let currentAbortController = null;
+let googleUserToken = null;
 
-// ---------- API Key Management ----------
-function getApiKey() {
-  return window.APP_API_KEY || "";
+// ---------- Google Identity Services ----------
+window.onload = function () {
+  if (typeof google !== 'undefined') {
+    google.accounts.id.initialize({
+      client_id: window.GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredentialResponse
+    });
+    
+    // Render button if element exists
+    const loginContainer = document.getElementById("login-button-container");
+    if (loginContainer) {
+      google.accounts.id.renderButton(loginContainer, { theme: "outline", size: "large" });
+    }
+  }
+  checkLocalAuth();
+};
+
+function handleGoogleCredentialResponse(response) {
+  googleUserToken = response.credential;
+  localStorage.setItem("google_token", googleUserToken);
+  updateAuthUI(true);
 }
 
-function getHeaders(includeContentType = true) {
-  const headers = {
-    "X-API-Key": getApiKey()
-  };
-  if (includeContentType) {
-    headers["Content-Type"] = "application/json";
+function checkLocalAuth() {
+  const savedToken = localStorage.getItem("google_token");
+  if (savedToken) {
+    googleUserToken = savedToken;
+    updateAuthUI(true);
+  } else {
+    updateAuthUI(false);
   }
+}
+
+loginBtn.addEventListener("click", () => {
+  if (googleUserToken) {
+    // Log out action
+    googleUserToken = null;
+    localStorage.removeItem("google_token");
+    if (typeof google !== 'undefined') {
+      google.accounts.id.cancel();
+    }
+    updateAuthUI(false);
+  } else {
+    // Trigger Google Sign-In prompt
+    if (typeof google !== 'undefined') {
+      google.accounts.id.prompt();
+    } else {
+      alert("Google Identity Services script still loading.");
+    }
+  }
+});
+
+function updateAuthUI(isAuthenticated) {
+  if (isAuthenticated) {
+    loginBtn.textContent = "Log Out";
+    refreshProjects();
+  } else {
+    loginBtn.textContent = "Log In with Google";
+    chatDiv.innerHTML = '<div class="message assistant"><em>Please log in to use the coding assistant.</em></div>';
+  }
+}
+
+async function getHeaders(includeContentType = true) {
+  if (!googleUserToken) {
+    throw new Error("User not authenticated with Google.");
+  }
+
+  const headers = {};
+  headers["Authorization"] = `Bearer ${googleUserToken}`;
+  if (includeContentType) headers["Content-Type"] = "application/json";
   return headers;
 }
 
 // ---------- Project History Loading ----------
-
 async function loadHistory(project) {
   chatDiv.innerHTML = '<div class="message assistant"><em>Loading history...</em></div>';
-  
   try {
     const res = await fetch(`/history/${encodeURIComponent(project)}`);
     const data = await res.json();
-    
-    chatDiv.innerHTML = ""; // Clear loading indicator
-
+    chatDiv.innerHTML = "";
     if (data.history && data.history.length > 0) {
       data.history.forEach(msg => {
         if (msg.role === "user") {
@@ -59,7 +115,6 @@ projectSelect.addEventListener("change", () => {
   loadHistory(projectSelect.value);
 });
 
-// ---------- Chat message helpers ----------
 function makeUserNode(text) {
   const node = document.createElement("div");
   node.className = "message user";
@@ -79,12 +134,11 @@ function appendAndScroll(node) {
   chatDiv.scrollTop = chatDiv.scrollHeight;
 }
 
-// ---------- Project management ----------
 async function refreshProjects() {
+  if (!googleUserToken) return;
   const res = await fetch("/projects");
   const data = await res.json();
   const currentVal = projectSelect.value;
-  
   projectSelect.innerHTML = "";
   data.forEach(p => {
     const opt = document.createElement("option");
@@ -92,7 +146,6 @@ async function refreshProjects() {
     opt.textContent = p;
     projectSelect.appendChild(opt);
   });
-
   if (data.includes(currentVal)) {
     projectSelect.value = currentVal;
   } else if (data.length > 0) {
@@ -104,9 +157,9 @@ async function refreshProjects() {
 addProjectBtn.addEventListener("click", async () => {
   const name = prompt("Project Name:");
   if (!name) return;
-  await fetch(`/add_project`, { 
-    method: "POST", 
-    headers: getHeaders(),
+  await fetch(`/add_project`, {
+    method: "POST",
+    headers: await getHeaders(),
     body: JSON.stringify({ project: name })
   });
   await refreshProjects();
@@ -115,15 +168,14 @@ addProjectBtn.addEventListener("click", async () => {
 deleteProjectBtn.addEventListener("click", async () => {
   const p = projectSelect.value;
   if (!p || !confirm(`Delete project ${p}?`)) return;
-  await fetch(`/delete_project`, { 
-    method: "POST", 
-    headers: getHeaders(),
+  await fetch(`/delete_project`, {
+    method: "POST",
+    headers: await getHeaders(),
     body: JSON.stringify({ project: p })
   });
   await refreshProjects();
 });
 
-// ---------- Core Chat Logic ----------
 sendBtn.addEventListener("click", async () => {
   const text = promptInput.value.trim();
   if (!text) return;
@@ -145,7 +197,7 @@ sendBtn.addEventListener("click", async () => {
       assistantNode.innerHTML = `<strong>Assistant:</strong><br><em>Searching web...</em>`;
       const sResp = await fetch("/search_web", {
         method: "POST",
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ query: text }),
         signal: currentAbortController.signal
       });
@@ -155,7 +207,7 @@ sendBtn.addEventListener("click", async () => {
 
     const res = await fetch("/chat", {
       method: "POST",
-      headers: getHeaders(),
+      headers: await getHeaders(),
       body: JSON.stringify({ project, message: text, search_results }),
       signal: currentAbortController.signal
     });
@@ -193,14 +245,11 @@ async function uploadFile(project) {
   formData.append("file", fileInput.files[0]);
 
   try {
-    // Do not set Content-Type header when uploading FormData so the browser automatically handles the boundary
-    const headers = {
-      "X-API-Key": getApiKey()
-    };
-    const res = await fetch(`/upload_file/${project}`, { 
-      method: "POST", 
+    const headers = await getHeaders(false); // browser sets multipart boundary
+    const res = await fetch(`/upload_file/${project}`, {
+      method: "POST",
       headers: headers,
-      body: formData 
+      body: formData
     });
     const data = await res.json();
     if (data.status === "ok") {
@@ -217,5 +266,3 @@ async function uploadFile(project) {
 promptInput.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key === "Enter") sendBtn.click();
 });
-
-refreshProjects();
