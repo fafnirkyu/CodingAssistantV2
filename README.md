@@ -34,19 +34,13 @@ This assistant provides high-quality coding intelligence within a constrained 2G
 └── README.md
 
 ---
-## 🔒 Security & Hardening
+## 🔒 Security & Authentication
 
 This project incorporates robust security controls tailored for public cloud deployments:
 
-1. Authentication: All sensitive mutation and inference routes require a valid X-API-Key header matched against environment variables.
+1. Authentication: Secure Google OAuth 2.0 / OIDC login supporting public multi-user access via JSON Web Token (JWT) verification.
 
 2. Rate Limiting: Custom IP-based rate tracking returns HTTP 429 (Too Many Requests) status codes if thresholds are exceeded.
-
-3. Verification: to verify the security implementation run sec_test.py:
-
-    ```bash
-    python sec_test.py
-    ```
 
 ---
 
@@ -64,6 +58,12 @@ This project incorporates robust security controls tailored for public cloud dep
     ```bash
     gunicorn --workers 1 --timeout 300 --bind 0.0.0.0:8080 backend.app:app
     ```
+
+## Deployment (Hugging Face Spaces)
+
+1. Environment Variables / Secrets: Add the following secret keys in your Space settings:
+    - `GOOGLE_CLIENT_ID`: Your Google OAuth Client ID.
+    - `TAVILY_API_KEY`: Your Tavily search API key.
 
 ### Privacy
 
