@@ -1,3 +1,13 @@
+---
+title: Coding Assistant
+emoji: 💻
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_file: app.py
+pinned: false
+---
+
 # Qwen Coder — Cloud-Native Personal Coding Assistant
 
 A project-aware coding companion powered by Qwen2.5-Coder-1.5B optimized for cloud deployment on Railway.
