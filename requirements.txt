@@ -6,3 +6,4 @@ gunicorn
 requests
 llama-cpp-python
 huggingface_hub
+joserfc
