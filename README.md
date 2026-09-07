@@ -1,4 +1,4 @@
-# Coding Assistant v2 — OAuth2/OIDC-Secured Local Coding Companion
+# Coding Assistant v2 — OAuth2/OIDC-Secured Local Coding Assistant
 
 A project-aware coding assistant powered by **Qwen2.5-Coder-0.5B-Instruct** (GGUF, 4-bit quantized), running entirely on CPU via `llama-cpp-python` — no external LLM API calls, no Ollama dependency.
 
