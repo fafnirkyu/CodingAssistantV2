@@ -1,8 +1,8 @@
-# Coding Assistant v2 — OAuth2/OIDC-Secured Cloud Coding Companion
+# Coding Assistant v2 — OAuth2/OIDC-Secured Local Coding Companion
 
 A project-aware coding assistant powered by **Qwen2.5-Coder-0.5B-Instruct** (GGUF, 4-bit quantized), running entirely on CPU via `llama-cpp-python` — no external LLM API calls, no Ollama dependency.
 
-This is the **v2** iteration of the project. The original API-key-authenticated version is preserved here: https://github.com/fafnirkyu/CodingAssistant — this version replaces static API keys with **Google OAuth 2.0 / OIDC**, aligned with how production APIs actually handle authentication.
+This is the **v2** iteration of the project. It replaces a static API-key approach with server-side verification of Google ID tokens using **OAuth 2.0 / OpenID Connect** concepts.
 
 ---
 
@@ -17,7 +17,7 @@ Earlier versions of this project used a static `X-API-Key` header — functional
    - Claims are validated: `iss` must be Google's issuer, `aud` must match this app's `GOOGLE_CLIENT_ID`, and `exp` must not have passed.
 3. Only requests with a **valid, unexpired, correctly-audienced** token reach protected routes (`/chat`, `/stream`, `/upload_file`, `/settings`, `/delete_project`).
 
-This means the backend never stores or checks a shared secret — it only needs to know how to verify a signature against a public key, the same pattern used by real identity providers (Auth0, Okta, Cognito) in production systems.
+The backend does not store a shared application API key for protected routes. It verifies Google-issued ID tokens against Google's published signing keys and validates issuer, audience, and expiry claims.
 
 ---
 
@@ -38,7 +38,7 @@ This means the backend never stores or checks a shared secret — it only needs 
 
 .
 ├── backend/
-│ └── app.py # Flask backend with Ollama integration
+│ └── app.py # Flask backend with local llama-cpp inference and OAuth verification
 ├── static/
 │ ├── styles.css # Dark mode styling
 │ └── script.js # Frontend interactivity & streaming
@@ -53,7 +53,32 @@ At runtime inside the container: model weights are stored at `/app/models`, and 
 
 ---
 
-## 🚀 Deployment
+## Local and container setup
+
+The application expects writable `/app/data` and `/app/models` paths when run in a container. The model is downloaded from Hugging Face on first startup if it is not already present in `/app/models`.
+
+Create local configuration from the template:
+
+```bash
+copy .env.example .env  # Windows PowerShell
+```
+
+Required for browser sign-in:
+
+```env
+GOOGLE_CLIENT_ID=your-google-oauth-client-id
+```
+
+For a containerized run:
+
+```bash
+docker build -t coding-assistant-v2 .
+docker run --rm -p 8080:8080 -e GOOGLE_CLIENT_ID=your-google-oauth-client-id -v coding-assistant-data:/app/data -v coding-assistant-models:/app/models coding-assistant-v2
+```
+
+Open `http://127.0.0.1:8080`. The first startup may take longer while the GGUF model downloads.
+
+## Deployment notes
 
 ### Railway
 1. Create a Volume, mount it to `/app/data` and `/app/models` (persists the model download and chat history across restarts).
@@ -72,7 +97,7 @@ Set these under **Settings → Variables and secrets**:
 - `GOOGLE_CLIENT_ID`
 - `TAVILY_API_KEY`
 
-No secrets are ever committed to the repository — both platforms inject them as environment variables at runtime.
+Keep secrets out of version control; both platforms can inject them as environment variables at runtime.
 
 ---
 
@@ -98,3 +123,10 @@ No secrets are ever committed to the repository — both platforms inject them a
 ## 🔐 Privacy
 
 The language model runs entirely inside the deployed container — no prompts or code are sent to OpenAI, Anthropic, or any other third-party LLM provider. The only external network calls are: Tavily (optional web search) and Google's JWKS endpoint (public key retrieval for auth — no user data is sent, only a request for public keys).
+
+## Current limitations
+
+- The rate limiter is in-memory and applies per application process; a multi-instance deployment would need shared rate-limit storage.
+- OAuth-protected routes require a configured Google OAuth client. The repository does not include credentials.
+- The optional code runner and linter are disabled by default (`RUNNER_ENABLED=0`, `LINTER_ENABLED=0`).
+- This is a portfolio project, not a hosted multi-tenant service.
