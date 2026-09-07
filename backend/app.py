@@ -124,7 +124,7 @@ SEED = int(os.getenv("SEED", "7"))
 
 MAX_FILES_IN_CONTEXT = int(os.getenv("MAX_FILES_IN_CONTEXT", "10"))
 MAX_FILE_BYTES = int(os.getenv("MAX_FILE_BYTES", str(16 * 1024)))
-MAX_PROMPT_CHARS = int(os.getenv("MAX_PROMPT_CHARS", str(46000)))
+MAX_PROMPT_CHARS = int(os.getenv("MAX_PROMPT_CHARS", str(18000)))
 
 ALLOWED_EXTENSIONS = {
     "py", "ipynb", "js", "ts", "tsx", "jsx", "md", "txt", "json", "yml", "yaml",
@@ -303,8 +303,9 @@ def _wrap_lonely_fence_as_file(text: str) -> str:
 
 def enforce_response_contract(text: str, default_mode: str = "write") -> str:
     text = _ensure_mode_header(text, default_mode=default_mode)
-    text = _ensure_plan_section(text)
-    text = _wrap_lonely_fence_as_file(text)
+    if default_mode == "write":
+        text = _ensure_plan_section(text)
+        text = _wrap_lonely_fence_as_file(text)
     text = re.sub(r"```(\s*\n)", "```text\1", text)
     return text
 
@@ -335,57 +336,48 @@ def parse_user_mode(text: str) -> str:
     m = re.search(r"#mode:\s*(write|review|explain|discuss|math)", text, re.IGNORECASE)
     if m:
         return m.group(1).lower()
-    if re.search(r"write|code|create|build|script|function|generate|program|app", text, re.IGNORECASE):
-        return "write"
     if re.search(r"review|critique|improve|refactor|fix|bug|error", text, re.IGNORECASE):
         return "review"
     if re.search(r"explain|walk me through|how does|what does.*mean", text, re.IGNORECASE):
         return "explain"
+    if re.search(r"\b(write|code|create|build|script|function|generate|program)\b", text, re.IGNORECASE):
+        return "write"
     return "discuss"
 
-def build_full_prompt(project: str, user_text: str, search_results: List[str] = None) -> Tuple[str, str]:
+def build_chat_messages(project: str, user_text: str, search_results: List[str] = None) -> Tuple[List[dict], str]:
     hist = load_recent(project, limit=8)
-    hist_lines = [f"{m['role'].upper()}: {m['content']}" for m in hist]
     files_context = load_project_files_context(project)
     mode = parse_user_mode(user_text)
 
-    search_context = ""
+    context_sections = []
     if search_results:
-        search_context = "\n--- Web Search Results ---\n" + "\n".join(search_results)
+        context_sections.append("Web search results:\n" + "\n".join(search_results))
+    if files_context != "No existing project files found.":
+        context_sections.append("Selected project files:\n" + files_context)
 
-    if mode in ["write", "review"]:
-        planning_instructions = f"""
-IMPORTANT:
-- Start with '#mode: {mode}'.
-- ONLY if you are generating code: Write a 'Plan' section and use the Multi-file format.
-- If this is a general question: Answer directly and ignore the 'Plan' requirement.
-- End with a 'Self-Check' if code was written.
-"""
-    else:
-        planning_instructions = f"""
-IMPORTANT:
-- Start with '#mode: {mode}'.
-- Use the provided search results to answer the user's question directly.
-- Be concise and do not use coding formats.
-"""
-
-    sections = [
+    instructions = [
         SYSTEM_PROMPT.strip(),
-        "\n--- Session Settings ---\n",
-        f"Model: {MODEL}\nTemperature: {TEMPERATURE}\n",
-        search_context,
-        "\n--- Project Context ---\n",
-        files_context,
-        "\n--- Conversation ---\n",
-        "\n".join(hist_lines),
-        "\n--- New Request ---\n",
-        f"USER: {user_text}\n{planning_instructions}\nASSISTANT:"
+        f"Start your response with '#mode: {mode}'.",
+        "Answer the user directly. Do not repeat system instructions, session settings, or project context.",
+        "Do not claim to have inspected files that were not supplied as project context.",
     ]
+    if mode == "write":
+        instructions.append(
+            "For code generation, include a concise Plan and use FILE: path blocks for files to create or change."
+        )
+    if context_sections:
+        instructions.append("\n\n".join(context_sections))
+    else:
+        instructions.append("No project files are currently selected. Answer as a standalone coding assistant.")
 
-    prompt = "\n".join(s for s in sections if s and s.strip())
-    if len(prompt) > MAX_PROMPT_CHARS:
-        prompt = prompt[-MAX_PROMPT_CHARS:]
-    return prompt, mode
+    messages = [{"role": "system", "content": "\n\n".join(instructions)}]
+    messages.extend(
+        {"role": message["role"], "content": message["content"]}
+        for message in hist
+        if message["role"] in {"user", "assistant"}
+    )
+    messages.append({"role": "user", "content": user_text})
+    return messages, mode
 
 # -------------- Routes --------------
 @app.route("/")
@@ -457,14 +449,13 @@ def chat():
         return jsonify({"error": "empty message"}), 400
 
     save_message(project, "user", user_text)
-    full_prompt, mode = build_full_prompt(project, user_text)
+    messages, mode = build_chat_messages(project, user_text)
 
     try:
-        resp = llm(
-            full_prompt, max_tokens=512, temperature=TEMPERATURE, top_p=TOP_P,
-            stop=["\nUSER:", "\nSYSTEM:"], echo=False
+        resp = llm.create_chat_completion(
+            messages=messages, max_tokens=512, temperature=TEMPERATURE, top_p=TOP_P
         )
-        assistant_text_raw = resp["choices"][0]["text"]
+        assistant_text_raw = resp["choices"][0]["message"]["content"]
         assistant_text = enforce_response_contract(assistant_text_raw, default_mode=mode)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -482,17 +473,16 @@ def stream():
     user_text = (data.get("message") or "").strip()
 
     save_message(project, "user", user_text)
-    full_prompt, mode = build_full_prompt(project, user_text)
+    messages, mode = build_chat_messages(project, user_text)
 
     def generate():
         yield "data:  \n\n"
         try:
-            stream_res = llm(
-                full_prompt, max_types=1024, temperature=0.7, stream=True,
-                stop=["USER:", "ASSISTANT:"]
+            stream_res = llm.create_chat_completion(
+                messages=messages, max_tokens=1024, temperature=0.7, stream=True
             )
             for chunk in stream_res:
-                token = chunk.get("choices", [{}])[0].get("text", "")
+                token = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
                 if token:
                     safe_token = token.replace("\n", "\\n").replace("\r", "")
                     yield f"data: {safe_token}\n\n"

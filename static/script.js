@@ -7,26 +7,32 @@ const projectSelect = document.getElementById("project");
 const addProjectBtn = document.getElementById("addProject");
 const deleteProjectBtn = document.getElementById("deleteProject");
 const loginBtn = document.getElementById("loginBtn");
+const loginContainer = document.getElementById("login-button-container");
 
 let currentAbortController = null;
 let googleUserToken = null;
 
 // ---------- Google Identity Services ----------
-window.onload = function () {
-  if (typeof google !== 'undefined') {
+window.addEventListener("load", () => {
+  if (!window.GOOGLE_CLIENT_ID) {
+    console.error("GOOGLE_CLIENT_ID is not configured.");
+    loginContainer.textContent = "Google sign-in is not configured.";
+  } else if (typeof google === "undefined") {
+    console.error("Google Identity Services did not load.");
+    loginContainer.textContent = "Google sign-in failed to load. Refresh and try again.";
+  } else {
     google.accounts.id.initialize({
       client_id: window.GOOGLE_CLIENT_ID,
-      callback: handleGoogleCredentialResponse
+      callback: handleGoogleCredentialResponse,
     });
-    
-    // Render button if element exists
-    const loginContainer = document.getElementById("login-button-container");
-    if (loginContainer) {
-      google.accounts.id.renderButton(loginContainer, { theme: "outline", size: "large" });
-    }
+    google.accounts.id.renderButton(loginContainer, {
+      theme: "outline",
+      size: "large",
+      text: "signin_with",
+    });
   }
   checkLocalAuth();
-};
+});
 
 function handleGoogleCredentialResponse(response) {
   googleUserToken = response.credential;
@@ -45,30 +51,23 @@ function checkLocalAuth() {
 }
 
 loginBtn.addEventListener("click", () => {
-  if (googleUserToken) {
-    // Log out action
-    googleUserToken = null;
-    localStorage.removeItem("google_token");
-    if (typeof google !== 'undefined') {
-      google.accounts.id.cancel();
-    }
-    updateAuthUI(false);
-  } else {
-    // Trigger Google Sign-In prompt
-    if (typeof google !== 'undefined') {
-      google.accounts.id.prompt();
-    } else {
-      alert("Google Identity Services script still loading.");
-    }
+  googleUserToken = null;
+  localStorage.removeItem("google_token");
+  if (typeof google !== "undefined") {
+    google.accounts.id.disableAutoSelect();
   }
+  updateAuthUI(false);
 });
 
 function updateAuthUI(isAuthenticated) {
   if (isAuthenticated) {
     loginBtn.textContent = "Log Out";
+    loginBtn.hidden = false;
+    loginContainer.hidden = true;
     refreshProjects();
   } else {
-    loginBtn.textContent = "Log In with Google";
+    loginBtn.hidden = true;
+    loginContainer.hidden = false;
     chatDiv.innerHTML = '<div class="message assistant"><em>Please log in to use the coding assistant.</em></div>';
   }
 }
