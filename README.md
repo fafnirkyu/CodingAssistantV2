@@ -55,7 +55,7 @@ At runtime inside the container: model weights are stored at `/app/models`, and 
 
 ## Local and container setup
 
-The application expects writable `/app/data` and `/app/models` paths when run in a container. The model is downloaded from Hugging Face on first startup if it is not already present in `/app/models`.
+By default, local runs store data in `./data`, models in `./models`, and uploaded project files in `./projects`. These paths can be overridden through `DATA_DIR`, `MODELS_DIR`, `MODEL_PATH`, and `PROJECTS_DIR`. In Docker, the same defaults resolve to `/app/data`, `/app/models`, and `/app/projects`.
 
 Create local configuration from the template:
 

@@ -6,6 +6,7 @@ import functools
 import sqlite3
 import subprocess
 from typing import List, Tuple, Optional
+from pathlib import Path
 from flask import Flask, request, jsonify, render_template, Response, abort
 import requests
 from werkzeug.utils import secure_filename
@@ -80,22 +81,41 @@ def require_oauth():
         return oauth_wrapper
     return oauth_decorator
 
-# --- Cloud Config ---
+# --- Local and container paths ---
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def configured_path(name: str, default: Path) -> Path:
+    """Resolve an optional path setting relative to the project root."""
+    value = Path(os.getenv(name, str(default))).expanduser()
+    return value if value.is_absolute() else PROJECT_ROOT / value
+
+
+DATA_DIR = configured_path("DATA_DIR", PROJECT_ROOT / "data")
+MODELS_DIR = configured_path("MODELS_DIR", PROJECT_ROOT / "models")
+PROJECTS_DIR = configured_path("PROJECTS_DIR", PROJECT_ROOT / "projects")
+
+for directory in (DATA_DIR, MODELS_DIR, PROJECTS_DIR):
+    directory.mkdir(parents=True, exist_ok=True)
+
+# --- Model configuration ---
 REPO_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF"
 FILENAME = "qwen2.5-coder-0.5b-instruct-q4_k_m.gguf"
 MODEL = REPO_ID
-os.makedirs("/app/data", exist_ok=True)
-os.makedirs("/app/models", exist_ok=True)
 
-model_path = os.path.join("/app/models", FILENAME)
-if not os.path.exists(model_path):
+model_path = configured_path("MODEL_PATH", MODELS_DIR / FILENAME)
+if not model_path.exists():
     print(f"Downloading model {FILENAME}...")
-    hf_hub_download(repo_id=REPO_ID, filename=FILENAME, local_dir="/app/models")
+    model_path = Path(
+        hf_hub_download(
+            repo_id=REPO_ID, filename=FILENAME, local_dir=str(model_path.parent)
+        )
+    )
 
-llm = Llama(model_path=model_path, n_ctx=8192, n_threads=4, n_batch=512, flash_attn=True)
+llm = Llama(model_path=str(model_path), n_ctx=8192, n_threads=4, n_batch=512, flash_attn=True)
 
-DB_PATH = "/app/data/memory.db"
-PROJECTS_DIR = os.getenv("PROJECTS_DIR", "./projects")
+DB_PATH = str(DATA_DIR / "memory.db")
+PROJECTS_DIR = str(PROJECTS_DIR)
 
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
 TOP_P = float(os.getenv("TOP_P", "0.9"))
@@ -590,5 +610,3 @@ def lint(project):
 if __name__ == "__main__":
     os.makedirs(PROJECTS_DIR, exist_ok=True)
     app.run(host="0.0.0.0", port=5000, debug=True)
-
-    
