@@ -172,11 +172,17 @@ def load_recent(project: str, limit: int = 12):
     rows = cur.fetchall()[::-1]
     return [{"role": r[0], "content": r[1]} for r in rows]
 
-def project_base_dir(project: str) -> str:
-    base = os.path.abspath(PROJECTS_DIR)
-    path = os.path.abspath(os.path.join(base, project))
-    if not path.startswith(base + os.sep) and path != base:
+def resolve_project_path(project: str) -> str:
+    """Resolve a project path without creating it or leaving the project root."""
+    base = Path(PROJECTS_DIR).resolve()
+    path = (base / project).resolve()
+    if path == base or base not in path.parents:
         abort(400, description="Invalid project path")
+    return str(path)
+
+
+def project_base_dir(project: str) -> str:
+    path = resolve_project_path(project)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -394,6 +400,7 @@ def protected_resource():
     return "This is a protected resource!"
 
 @app.route("/history/<project>", methods=["GET"])
+@require_oauth()
 def get_history(project):
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -408,6 +415,7 @@ def get_history(project):
         return jsonify({"error": str(e)}), 500
 
 @app.route("/projects")
+@require_oauth()
 def get_projects():
     cur.execute("SELECT DISTINCT project FROM messages ORDER BY project ASC")
     rows = cur.fetchall()
@@ -430,6 +438,7 @@ def settings():
     })
 
 @app.route("/add_project", methods=["POST"])
+@require_oauth()
 def add_project():
     data = request.json or {}
     project = (data.get("project") or "").strip()
@@ -541,15 +550,16 @@ def delete_project():
     project = (data.get("project") or "").strip()
     if not project:
         return jsonify({"error": "empty project name"}), 400
+    project_dir = resolve_project_path(project)
     cur.execute("DELETE FROM messages WHERE project=?", (project,))
     conn.commit()
-    project_dir = os.path.join(PROJECTS_DIR, project)
     if os.path.exists(project_dir):
         import shutil
         shutil.rmtree(project_dir)
     return jsonify({"status": "ok", "project": project})
 
 @app.route("/cancel", methods=["POST"])
+@require_oauth()
 def cancel():
     return jsonify({"status": "Session reset requested", "note": "Inference is self-contained."})
 

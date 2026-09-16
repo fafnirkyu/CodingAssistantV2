@@ -15,9 +15,10 @@ Earlier versions of this project used a static `X-API-Key` header — functional
    - The Flask backend fetches Google's public signing keys from `https://www.googleapis.com/oauth2/v3/certs` (Google's JWKS endpoint).
    - Each incoming token's signature is verified against the matching public key (`joserfc`).
    - Claims are validated: `iss` must be Google's issuer, `aud` must match this app's `GOOGLE_CLIENT_ID`, and `exp` must not have passed.
-3. Only requests with a **valid, unexpired, correctly-audienced** token reach protected routes (`/chat`, `/stream`, `/upload_file`, `/settings`, `/delete_project`).
+3. Only requests with a **valid, unexpired, correctly-audienced** token reach protected routes, including chat, project history, uploads, settings, and project-management operations.
 
 The backend does not store a shared application API key for protected routes. It verifies Google-issued ID tokens against Google's published signing keys and validates issuer, audience, and expiry claims.
+Project deletion uses the same path containment check as project creation, so a project name cannot target the project root or a directory outside it.
 
 ---
 

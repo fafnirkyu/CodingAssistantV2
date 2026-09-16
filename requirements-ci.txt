@@ -1,0 +1,5 @@
+Flask>=3,<4
+joserfc>=1,<2
+pytest>=8,<10
+python-dotenv>=1,<2
+requests>=2.32,<3
