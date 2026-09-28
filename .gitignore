@@ -44,5 +44,5 @@ Thumbs.db
 .idea/
 
 # Project-specific
-/projects/         # generated project files from assistant
-/uploads/          # uploaded files if you store them
+/projects/
+/uploads/
