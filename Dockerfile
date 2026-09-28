@@ -7,7 +7,7 @@ WORKDIR /app
 
 # Install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir huggingface_hub llama-cpp-python gunicorn flask requests python-dotenv
+RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Railway uses the PORT env var

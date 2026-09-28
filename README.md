@@ -1,133 +1,159 @@
-# Coding Assistant v2 — OAuth2/OIDC-Secured Local Coding Assistant
+# Coding Assistant V2 — OIDC-Secured Local Coding Assistant
 
-A project-aware coding assistant powered by **Qwen2.5-Coder-0.5B-Instruct** (GGUF, 4-bit quantized), running entirely on CPU via `llama-cpp-python` — no external LLM API calls, no Ollama dependency.
+A project-aware coding assistant powered by **Qwen2.5-Coder-0.5B-Instruct** in GGUF format. It runs locally through `llama-cpp-python`, supports persistent project conversations, and can incorporate uploaded source files into its context.
 
-This is the **v2** iteration of the project. It replaces a static API-key approach with server-side verification of Google ID tokens using **OAuth 2.0 / OpenID Connect** concepts.
+Google OpenID Connect protects the application routes. Optional Tavily search can add current web context when explicitly enabled.
 
----
+## Features
 
-## 🔒 Authentication Architecture
+- **Local LLM inference** using a quantized Qwen2.5-Coder model.
+- **Google OpenID Connect authentication** with server-side ID-token verification.
+- **Project-aware context** built from uploaded source files.
+- **Persistent conversation history** stored in SQLite.
+- **Streaming responses** through Server-Sent Events.
+- **Optional web search** through the Tavily API.
+- **File uploads and project management** through the browser interface.
+- **Rate limiting** for protected operations.
+- **Optional code runner and linter**, disabled by default for safety.
 
-Earlier versions of this project used a static `X-API-Key` header — functional, but not representative of how real systems authenticate. This version implements proper **OAuth 2.0 / OpenID Connect**:
+## Authentication flow
 
-1. **Frontend**: Google Identity Services (`google.accounts.id`) handles the sign-in UI and returns a signed **ID token (JWT)** issued by Google.
-2. **Backend verification** (no shared secret involved):
-   - The Flask backend fetches Google's public signing keys from `https://www.googleapis.com/oauth2/v3/certs` (Google's JWKS endpoint).
-   - Each incoming token's signature is verified against the matching public key (`joserfc`).
-   - Claims are validated: `iss` must be Google's issuer, `aud` must match this app's `GOOGLE_CLIENT_ID`, and `exp` must not have passed.
-3. Only requests with a **valid, unexpired, correctly-audienced** token reach protected routes, including chat, project history, uploads, settings, and project-management operations.
+1. Google Identity Services displays the sign-in interface and returns a signed OpenID Connect ID token.
+2. The Flask backend downloads Google's public signing keys from its JWKS endpoint.
+3. The backend verifies the token signature and validates its issuer, audience, and expiration.
+4. Only requests with a valid token can access protected routes such as chat, history, settings, uploads, and project management.
 
-The backend does not store a shared application API key for protected routes. It verifies Google-issued ID tokens against Google's published signing keys and validates issuer, audience, and expiry claims.
-Project deletion uses the same path containment check as project creation, so a project name cannot target the project root or a directory outside it.
+The application does not use a shared API key for protected routes. Project paths are resolved and checked before use so a project name cannot escape the configured project directory.
 
----
+## Project structure
 
-## ✨ Features
-
-- **Local LLM inference** — Qwen2.5-Coder-0.5B, quantized to fit CPU-only, low-RAM environments.
-- **OAuth2/OIDC authentication** — Google Sign-In, verified server-side via JWKS.
-- **Rate limiting** — IP-based request throttling, returns `429` when exceeded.
-- **Project-based context** — automatically injects relevant uploaded project files into the model's context window.
-- **Streaming responses** — token-by-token output via Server-Sent Events.
-- **Web search integration** — Tavily API for grounding answers in current information.
-- **File uploads** — attach project files directly through the web UI.
-- **Persistent chat memory** — per-project conversation history via SQLite.
-
----
-
-## 📂 Project Structure
-
+```text
 .
 ├── backend/
-│ └── app.py # Flask backend with local llama-cpp inference and OAuth verification
-├── static/
-│ ├── styles.css # Dark mode styling
-│ └── script.js # Frontend interactivity & streaming
-├── templates/
-│ └── index.html # Web interface
-├── projects/ # Your saved coding projects
-├── memory.db # SQLite chat history database
-└── README.md
-
----
-At runtime inside the container: model weights are stored at `/app/models`, and the SQLite chat history database at `/app/data/memory.db`.
-
----
-
-## Local and container setup
-
-By default, local runs store data in `./data`, models in `./models`, and uploaded project files in `./projects`. These paths can be overridden through `DATA_DIR`, `MODELS_DIR`, `MODEL_PATH`, and `PROJECTS_DIR`. In Docker, the same defaults resolve to `/app/data`, `/app/models`, and `/app/projects`.
-
-Create local configuration from the template:
-
-```bash
-copy .env.example .env  # Windows PowerShell
+│   └── app.py                 # Flask API, authentication, storage, and inference
+├── static/                    # Browser JavaScript and styling
+├── templates/                 # Web interface
+├── tests/                     # Backend access and security tests
+├── data/                      # Runtime SQLite data; ignored by Git
+├── models/                    # Downloaded GGUF models; ignored by Git
+├── projects/                  # Uploaded project files; ignored by Git
+├── .env.example               # Configuration template
+├── Dockerfile
+├── requirements.txt           # Runtime dependencies
+└── requirements-ci.txt        # Lightweight CI test dependencies
 ```
 
-Required for browser sign-in:
+Runtime directories can be changed with `DATA_DIR`, `MODELS_DIR`, and `PROJECTS_DIR`. A specific local model can be selected with `MODEL_PATH`.
+
+## Local setup
+
+The examples below use Windows PowerShell.
+
+```powershell
+git clone https://github.com/fafnirkyu/CodingAssistantV2.git
+cd CodingAssistantV2
+
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+
+Copy-Item .env.example .env
+```
+
+Add your Google OAuth client ID to `.env`:
 
 ```env
-GOOGLE_CLIENT_ID=your-google-oauth-client-id
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 ```
 
-For a containerized run:
+To enable optional web search, also configure:
 
-```bash
+```env
+TAVILY_API_KEY=your-tavily-api-key
+```
+
+Start the development server:
+
+```powershell
+python -m backend.app
+```
+
+Open `http://127.0.0.1:5000`. On first startup, the application downloads the configured GGUF model from Hugging Face unless `MODEL_PATH` points to an existing file.
+
+## Docker
+
+Build the image:
+
+```powershell
 docker build -t coding-assistant-v2 .
-docker run --rm -p 8080:8080 -e GOOGLE_CLIENT_ID=your-google-oauth-client-id -v coding-assistant-data:/app/data -v coding-assistant-models:/app/models coding-assistant-v2
 ```
 
-Open `http://127.0.0.1:8080`. The first startup may take longer while the GGUF model downloads.
+Run it with persistent volumes for conversations, models, and project files:
+
+```powershell
+docker run --rm -p 8080:8080 --env-file .env -v coding-assistant-data:/app/data -v coding-assistant-models:/app/models -v coding-assistant-projects:/app/projects coding-assistant-v2
+```
+
+Open `http://127.0.0.1:8080`.
+
+## Tests
+
+The CI dependency set avoids installing the full local inference stack because the access tests mock model download and loading.
+
+```powershell
+python -m pip install -r requirements-ci.txt
+python -m pytest -q
+```
+
+GitHub Actions runs the backend access tests on every push and pull request.
 
 ## Deployment notes
 
-### Railway
-1. Create a Volume, mount it to `/app/data` and `/app/models` (persists the model download and chat history across restarts).
-2. Environment variables:
-   - `GOOGLE_CLIENT_ID` — OAuth Client ID from Google Cloud Console.
-   - `TAVILY_API_KEY` — API key for web search.
-   - `PORT` — `8080`
-   - `PYTHONUNBUFFERED` — `1`
-3. Start command:
-```bash
-   gunicorn --workers 1 --timeout 300 --bind 0.0.0.0:8080 backend.app:app
+The included Dockerfile starts one Gunicorn worker on port `8080`:
+
+```text
+gunicorn --bind 0.0.0.0:8080 backend.app:app
 ```
 
-### Hugging Face Spaces
-Set these under **Settings → Variables and secrets**:
-- `GOOGLE_CLIENT_ID`
-- `TAVILY_API_KEY`
+For a container platform such as Railway:
 
-Keep secrets out of version control; both platforms can inject them as environment variables at runtime.
+1. Build the repository with its Dockerfile.
+2. Configure `GOOGLE_CLIENT_ID` and, optionally, `TAVILY_API_KEY` as environment variables.
+3. Persist the data, model, and project directories. They may be separate volumes, or subdirectories of one mounted volume configured through `DATA_DIR`, `MODELS_DIR`, and `PROJECTS_DIR`.
+4. Keep one application worker unless the SQLite connection and in-memory rate limiter are replaced with multi-process-safe alternatives.
 
----
+Keep credentials and API keys out of version control.
 
-## 🧩 Technology Stack
+## Technology stack
 
 **Backend**
+
 - Python 3.10
-- Flask — routing and API
-- `llama-cpp-python` — local GGUF model inference
-- `joserfc` — JWT/JWKS verification for OAuth2/OIDC
-- SQLite — per-project chat history
-- `requests` — Tavily search + Google JWKS fetching
+- Flask and Gunicorn
+- `llama-cpp-python`
+- `huggingface-hub`
+- `joserfc` for JWT and JWKS verification
+- SQLite
+- Requests
 
 **Frontend**
-- HTML5 / CSS3
-- Vanilla JavaScript (ES6+), Fetch API
-- Google Identity Services (`accounts.google.com/gsi/client`)
-- Marked.js — Markdown rendering
-- Highlight.js — code syntax highlighting
 
----
+- HTML, CSS, and vanilla JavaScript
+- Google Identity Services
+- Marked.js
+- Highlight.js
 
-## 🔐 Privacy
+## Privacy and external services
 
-The language model runs entirely inside the deployed container — no prompts or code are sent to OpenAI, Anthropic, or any other third-party LLM provider. The only external network calls are: Tavily (optional web search) and Google's JWKS endpoint (public key retrieval for auth — no user data is sent, only a request for public keys).
+LLM inference runs in the application process. Prompts and uploaded code are not sent to an external LLM provider.
+
+Google Identity Services communicates with Google during sign-in, and the backend requests Google's public signing keys to verify ID tokens. When optional Tavily search is enabled, the submitted search query is sent to Tavily.
 
 ## Current limitations
 
-- The rate limiter is in-memory and applies per application process; a multi-instance deployment would need shared rate-limit storage.
-- OAuth-protected routes require a configured Google OAuth client. The repository does not include credentials.
-- The optional code runner and linter are disabled by default (`RUNNER_ENABLED=0`, `LINTER_ENABLED=0`).
-- This is a portfolio project, not a hosted multi-tenant service.
+- Authentication is implemented, but project files and conversation history are not isolated by user. Authenticated users share the configured storage, so this version is intended for personal or controlled demonstration environments.
+- The rate limiter is stored in application memory and applies independently to each process.
+- SQLite access and model loading are designed around a single application worker.
+- The optional runner and linter are disabled by default with `RUNNER_ENABLED=0` and `LINTER_ENABLED=0`.
+- Model startup and response speed depend on available CPU and memory.
+- This is a portfolio project, not a production-ready multi-tenant service.

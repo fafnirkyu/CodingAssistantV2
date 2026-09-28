@@ -1,9 +1,7 @@
-flask
-python-dotenv
-requests
-flask
-gunicorn
-requests
-llama-cpp-python
-huggingface_hub
-joserfc
+Flask>=3,<4
+gunicorn>=22,<24
+huggingface-hub>=0.27,<2
+joserfc>=1,<2
+llama-cpp-python>=0.3,<1
+python-dotenv>=1,<2
+requests>=2.32,<3
